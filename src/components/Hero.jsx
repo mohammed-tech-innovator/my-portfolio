@@ -7,7 +7,7 @@ const NAME = 'Mohammed Yousif';
 const TITLE = 'AI Research Engineer — Reinforcement Learning · Computer Vision · Autonomous Systems';
 const LOCATION = 'Abu Dhabi, UAE';
 const EMAIL = 'mohammed.yah.yousif@gmail.com';
-const IMAGE_SRC = '/profile.jpg';
+const IMAGE_SRC = '/profile.jpg'; // <- public folder, absolute path
 
 const SOCIALS = [
   { href: 'https://github.com/mohammed-tech-innovator', icon: Github, label: 'GitHub' },
@@ -23,12 +23,13 @@ const CODE_LINES = [
   `  focus: ["Reinforcement Learning", "Computer Vision", "Autonomous Systems"],`,
   `  location: "${LOCATION}",`,
   `  email: "${EMAIL}",`,
+  `  projects: ["OthelloSHAZA", "Hierarchical RL Agent", "Vision Autopilot"],`,
   `};`,
   ``,
   `// run: npm run research --fast`,
 ];
 
-const TECH = ['PyTorch', 'OpenCV', 'PPO', 'NumPy', 'HuggingFace', 'GCP', 'TensorFlow', 'VertexAI'];
+const TECH = ['PyTorch', 'OpenCV', 'PPO', 'NumPy', 'YOLOv4', 'U-Net', 'GCP'];
 
 function useTyping(lines, speed = 25, lineDelay = 500) {
   const [displayed, setDisplayed] = useState(lines.map(() => ''));
@@ -83,12 +84,9 @@ export default function HeroCodey({ darkMode = false }) {
             )}
           >
             <img
-              src={IMAGE_SRC}
+              src={process.env.PUBLIC_URL + IMAGE_SRC}
               alt={NAME}
               className="w-48 h-48 md:w-64 md:h-64 rounded-lg object-cover bg-gray-200"
-              onError={e => {
-                e.currentTarget.style.display = 'none';
-              }}
             />
           </div>
 
@@ -96,16 +94,11 @@ export default function HeroCodey({ darkMode = false }) {
             <h1 className={cx('text-3xl md:text-4xl font-bold font-mono', darkMode ? 'text-white' : 'text-gray-900')}>{NAME}</h1>
             <p className={cx('mt-1 text-sm md:text-base font-mono', darkMode ? 'text-gray-300' : 'text-gray-600')}>{TITLE}</p>
 
-            <div className="mt-4 flex flex-wrap gap-4 justify-center md:justify-start">
-              {SOCIALS.map(({ href, icon: Icon, label }) => (
-                <a
-                  key={label}
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={cx('flex items-center gap-2 text-sm font-mono underline hover:opacity-80 transition-opacity', darkMode ? 'text-gray-200' : 'text-gray-800')}
-                >
-                  <Icon className="w-4 h-4" /> {label}
+            <div className="mt-4 flex flex-wrap gap-2 justify-center md:justify-start">
+              {SOCIALS.map(s => (
+                <a key={s.label} href={s.href} target="_blank" rel="noreferrer" className={cx('flex items-center gap-1 px-3 py-1 rounded-md text-sm font-mono underline')}>
+                  <s.icon size={16} />
+                  {s.label}
                 </a>
               ))}
             </div>
