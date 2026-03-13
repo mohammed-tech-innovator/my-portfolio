@@ -7,13 +7,13 @@ const NAME = 'Mohammed Yousif';
 const TITLE = 'AI Research Engineer — Reinforcement Learning · Computer Vision · Autonomous Systems';
 const LOCATION = 'Abu Dhabi, UAE';
 const EMAIL = 'mohammed.yah.yousif@gmail.com';
-const IMAGE_SRC = '/profile.jpg'; // <- public folder, absolute path
+const IMAGE_SRC = '/profile.jpg';
 
 const SOCIALS = [
   { href: 'https://github.com/mohammed-tech-innovator', icon: Github, label: 'GitHub' },
   { href: 'https://www.linkedin.com/in/mohammed-yousif-86208b245/', icon: Linkedin, label: 'LinkedIn' },
   { href: 'https://scholar.google.com/citations?user=27RB04gAAAAJ', icon: BookOpen, label: 'Scholar' },
-  { href: 'https://scholar.google.com/citations?user=27RB04gAAAAJ', icon: FileText, label: 'Résumé' }
+  { href: 'https://drive.google.com/file/d/1L09AOUhQYPu-m96W0yiM0TTSRuqJl7BV/view?usp=sharing', icon: FileText, label: 'Résumé' }
 ];
 
 const CODE_LINES = [
@@ -23,13 +23,12 @@ const CODE_LINES = [
   `  focus: ["Reinforcement Learning", "Computer Vision", "Autonomous Systems"],`,
   `  location: "${LOCATION}",`,
   `  email: "${EMAIL}",`,
-  `  projects: ["OthelloSHAZA", "Hierarchical RL Agent", "Vision Autopilot"],`,
   `};`,
   ``,
   `// run: npm run research --fast`,
 ];
 
-const TECH = ['PyTorch', 'OpenCV', 'PPO', 'NumPy', 'YOLOv4', 'U-Net', 'GCP'];
+const TECH = ['PyTorch', 'OpenCV', 'PPO', 'NumPy', 'HuggingFace', 'GCP', 'TensorFlow', 'VertexAI'];
 
 function useTyping(lines, speed = 25, lineDelay = 500) {
   const [displayed, setDisplayed] = useState(lines.map(() => ''));
@@ -72,8 +71,8 @@ export default function HeroCodey({ darkMode = false }) {
   const { displayed } = useTyping(CODE_LINES, 22, 300);
 
   return (
-    <section className="pt-32 pb-20 px-6">
-      <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-8 items-start">
+    <section className="pt-32 pb-20 px-6 relative">
+      <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-8 items-start relative z-10">
 
         {/* Avatar */}
         <div className="flex flex-col items-center md:items-start gap-6">
@@ -86,7 +85,10 @@ export default function HeroCodey({ darkMode = false }) {
             <img
               src={process.env.PUBLIC_URL + IMAGE_SRC}
               alt={NAME}
-              className="w-48 h-48 md:w-64 md:h-64 rounded-lg object-cover bg-gray-200"
+              className="w-48 h-48 md:w-64 md:h-64 rounded-lg object-cover bg-slate-300"
+              onError={e => {
+                e.currentTarget.style.display = 'none';
+              }}
             />
           </div>
 
@@ -94,11 +96,32 @@ export default function HeroCodey({ darkMode = false }) {
             <h1 className={cx('text-3xl md:text-4xl font-bold font-mono', darkMode ? 'text-white' : 'text-gray-900')}>{NAME}</h1>
             <p className={cx('mt-1 text-sm md:text-base font-mono', darkMode ? 'text-gray-300' : 'text-gray-600')}>{TITLE}</p>
 
-            <div className="mt-4 flex flex-wrap gap-2 justify-center md:justify-start">
-              {SOCIALS.map(s => (
-                <a key={s.label} href={s.href} target="_blank" rel="noreferrer" className={cx('flex items-center gap-1 px-3 py-1 rounded-md text-sm font-mono underline')}>
-                  <s.icon size={16} />
-                  {s.label}
+            <div className="mt-6 flex flex-wrap gap-4 justify-center md:justify-start">
+              <a
+                href="https://drive.google.com/file/d/1L09AOUhQYPu-m96W0yiM0TTSRuqJl7BV/view?usp=sharing"
+                target="_blank"
+                rel="noreferrer"
+                className={cx(
+                  'flex items-center gap-2 px-5 py-2.5 rounded-lg font-mono font-bold text-sm transition-transform hover:-translate-y-1 shadow-lg',
+                  darkMode 
+                    ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/50' 
+                    : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/30'
+                )}
+              >
+                <FileText size={18} /> Download CV
+              </a>
+            </div>
+
+            <div className="mt-6 flex flex-wrap gap-4 justify-center md:justify-start">
+              {SOCIALS.filter(s => s.label !== 'Résumé').map(({ href, icon: Icon, label }) => (
+                <a
+                  key={label}
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={cx('flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono border transition-colors', darkMode ? 'bg-gray-800 border-gray-700 text-blue-300 hover:bg-gray-700 hover:text-white' : 'bg-blue-50 border-blue-100 text-blue-700 hover:bg-blue-100 hover:text-blue-900')}
+                >
+                  <Icon className="w-4 h-4" /> {label}
                 </a>
               ))}
             </div>
@@ -107,8 +130,8 @@ export default function HeroCodey({ darkMode = false }) {
 
         {/* Terminal / code card */}
         <div>
-          <div className={cx('rounded-xl overflow-hidden shadow-lg font-mono', darkMode ? 'bg-gray-900 border border-gray-700' : 'bg-white border border-gray-200')}>
-            <div className={cx('flex items-center gap-2 px-4 py-2', darkMode ? 'bg-gray-800' : 'bg-gray-100')}>
+          <div className={cx('rounded-xl overflow-hidden shadow-lg font-mono', darkMode ? 'bg-gray-900 border border-gray-700' : 'bg-slate-50 border border-slate-300')}>
+            <div className={cx('flex items-center gap-2 px-4 py-2', darkMode ? 'bg-gray-800' : 'bg-slate-200')}>
               <div className="flex gap-2">
                 <span className="w-3 h-3 rounded-full bg-red-400" />
                 <span className="w-3 h-3 rounded-full bg-yellow-400" />
