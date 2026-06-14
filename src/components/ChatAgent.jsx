@@ -6,18 +6,17 @@ const cx = (...args) => args.filter(Boolean).join(' ');
 // ==========================================
 // CONFIGURATION
 // ==========================================
-// Update this URL to point to your actual AI backend API.
-export const AI_API_URL = process.env.REACT_APP_AI_API_URL || 'https://api.example.com/v1/chat';
+// Points to the portfolio backend API (same origin, nginx proxies /api/* to backend)
+export const AI_API_URL = '/api/chat';
 
-// Fallback local responses in case the API is offline or not set up yet
-const BOT_RESPONSES = {
-  'help': 'Available commands: /about, /projects, /research, /contact, /clear',
-  'about': 'Mohammed is an AI Research Engineer focused on RL and CV. He graduated from the University of Khartoum with First Class Honours.',
-  'projects': 'He has built Hierarchical RL agents, Othello AI (PPO), and CV Autopilots. Check the "projects" section for details!',
-  'research': 'His research includes Audio Deepfake Detection and Advanced RL for Othello. See the "research" section for DOIs.',
-  'contact': 'You can reach him via the contact form or at mohammed.yah.yousif@gmail.com.',
-  'hi': 'Hello! I am Mohammed\'s terminal assistant. Type /help to see what I can do.',
-  'hello': 'Hello! I am Mohammed\'s terminal assistant. Type /help to see what I can do.',
+// Session ID for persistent chat context
+let _sessionId = null;
+const getSessionId = () => {
+  if (!_sessionId) {
+    _sessionId = localStorage.getItem('chat_session_id') || `web_${Date.now()}`;
+    localStorage.setItem('chat_session_id', _sessionId);
+  }
+  return _sessionId;
 };
 
 // ==========================================
@@ -87,35 +86,31 @@ export default function ChatAgent({ darkMode }) {
     }
 
     try {
-      // 1. Attempt to fetch from the custom external API
       const response = await fetch(AI_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg })
+        body: JSON.stringify({ message: userMsg, session_id: getSessionId() })
       });
 
-      if (!response.ok) throw new Error('API Offline');
+      if (!response.ok) throw new Error('API error');
 
       const data = await response.json();
       
+      // Store session ID for continuity
+      if (data.session_id) {
+        _sessionId = data.session_id;
+        localStorage.setItem('chat_session_id', data.session_id);
+      }
+      
       setIsTyping(false);
       playReceiveSound();
-      setMessages(prev => [...prev, { role: 'bot', text: data.reply || data.response }]);
+      setMessages(prev => [...prev, { role: 'bot', text: data.reply }]);
       
     } catch (error) {
-      // 2. Fallback to local bot if the API fails or isn't set up
-      setTimeout(() => {
-        let botText = "Command not recognized. Type /help for assistance. (API Offline: Using local fallback)";
-        const cmd = userMsgLower.startsWith('/') ? userMsgLower.slice(1) : userMsgLower;
-        
-        if (BOT_RESPONSES[cmd]) {
-          botText = BOT_RESPONSES[cmd];
-        }
-
-        setIsTyping(false);
-        playReceiveSound();
-        setMessages(prev => [...prev, { role: 'bot', text: botText }]);
-      }, 600); // Simulate network delay
+      console.error('Chat API error:', error);
+      setIsTyping(false);
+      playReceiveSound();
+      setMessages(prev => [...prev, { role: 'bot', text: '⚠ Connection to AI backend failed. Please try again later.' }]);
     }
   };
 

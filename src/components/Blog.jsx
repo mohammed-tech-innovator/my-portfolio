@@ -6,8 +6,8 @@ const cx = (...args) => args.filter(Boolean).join(' ');
 // ==========================================
 // CONFIGURATION
 // ==========================================
-// Update this URL to point to your actual Blog API.
-export const BLOG_API_URL = process.env.REACT_APP_BLOG_API_URL || 'https://api.example.com/v1/blogs';
+// Points to the portfolio backend API (same origin)
+export const BLOG_API_URL = '/api/blog';
 
 // Fallback local blogs in case the API is offline
 const FALLBACK_BLOGS = [

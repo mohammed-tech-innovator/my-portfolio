@@ -5,6 +5,7 @@ import LetterGlitch from './components/LetterGlitch';
 import Waves from './components/Waves';
 import ChatAgent from './components/ChatAgent';
 import Blog from './components/Blog';
+import Hyperspeed from './components/Hyperspeed';
 import {
   Moon,
   Sun,
@@ -57,8 +58,7 @@ const PROJECTS = [
     description:
       'PPO-based self-play process that outperforms a classical MiniMax engine (up to depth 12). Focus on training efficiency and inference speed.',
     tech: ['PyTorch', 'NumPy', 'Numba', 'PPO', 'Self-Play'],
-    github: 'https://github.com/mohammed-tech-innovator/OthelloSHAZA',
-    video: 'https://youtube.com'
+    github: 'https://github.com/mohammed-tech-innovator/OthelloSHAZA'
   },
   {
     title: 'Computer-Vision Autopilot for Autonomous Vehicles',
@@ -66,8 +66,7 @@ const PROJECTS = [
     description:
       'End-to-end vision-based autopilot, trained YOLOv4 for traffic signs, and improved semantic segmentation with U-Net variants. Built a Raspberry Pi self-driving car.',
     tech: ['PyTorch', 'OpenCV', 'YOLOv4', 'U-Net', 'Raspberry Pi'],
-    github: 'https://github.com/mohammed-tech-innovator',
-    video: 'https://youtube.com'
+    github: 'https://github.com/mohammed-tech-innovator'
   },
   {
     title: 'Euler: IoT Surgery Robot',
@@ -345,6 +344,21 @@ export default function Portfolio() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Visual Experience — Hyperspeed Tunnel */}
+        <section className={cx('relative h-[500px] overflow-hidden', darkMode ? 'bg-black' : 'bg-slate-900')}>
+          <div className="absolute inset-0 opacity-60">
+            <Hyperspeed />
+          </div>
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+            <div className="text-center">
+              <p className={cx('font-mono text-2xl md:text-4xl font-bold', darkMode ? 'text-white/70' : 'text-white/60')}>
+                $ ssh into-the-future
+              </p>
+              <p className="font-mono text-sm mt-2 text-blue-400/60">building what's next_</p>
             </div>
           </div>
         </section>
