@@ -1,22 +1,19 @@
 """
-Portfolio Backend API — FastAPI + SQLite
-Serves: chat bot (limited scope), blog, contact form, statistics
+Portfolio Backend API — FastAPI + PostgreSQL (asyncpg)
+Serves: chat bot (limited scope), blog, contact, statistics
 """
-import asyncio
 import json
-import re
+import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
-import aiosqlite
+import asyncpg
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-DB_PATH = Path(__file__).parent / "portfolio.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://mohammed@localhost/portfolio")
 
 # ── Mohammed's Portfolio Knowledge Base ──────────────────────────
 
@@ -92,41 +89,41 @@ FALLBACK = (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("PRAGMA journal_mode=WAL")
-        await db.execute("""
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+    async with pool.acquire() as conn:
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 session_id TEXT NOT NULL,
                 role TEXT NOT NULL CHECK(role IN ('user','bot')),
                 content TEXT NOT NULL,
                 topic TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
-        await db.execute("""
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS blog_posts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 title TEXT NOT NULL,
                 summary TEXT NOT NULL,
                 content TEXT DEFAULT '',
-                tags TEXT DEFAULT '[]',
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                tags JSONB DEFAULT '[]',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
-        await db.execute("""
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS contact_submissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
                 email TEXT NOT NULL,
                 message TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
-        await db.commit()
-        app.state.db = db
-        yield
+    app.state.pool = pool
+    yield
+    await pool.close()
 
 
 app = FastAPI(title="Mohammed's Portfolio API", lifespan=lifespan)
@@ -160,13 +157,10 @@ class ContactSubmission(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────
 
 def detect_topic(text: str) -> Optional[str]:
-    """Simple keyword-based topic detection."""
     text_lower = text.lower().strip()
-    # Direct commands
     cmd = text_lower.lstrip("/")
     if cmd in COMMAND_MAP:
         return COMMAND_MAP[cmd]
-    # Keyword matching
     for topic, keywords in TOPIC_KEYWORDS.items():
         for kw in keywords:
             if kw in text_lower:
@@ -175,7 +169,6 @@ def detect_topic(text: str) -> Optional[str]:
 
 
 def chat_response(message: str) -> dict:
-    """Generate a scoped chatbot response."""
     topic = detect_topic(message)
     response_text = PORTFOLIO_KB.get(topic, FALLBACK) if topic else FALLBACK
     return {"reply": response_text, "topic": topic}
@@ -185,192 +178,131 @@ def chat_response(message: str) -> dict:
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest, request: Request):
-    """Chat with Mohammed's portfolio assistant (limited scope)."""
-    db: aiosqlite.Connection = request.app.state.db
+    pool: asyncpg.Pool = request.app.state.pool
     session_id = req.session_id or f"web_{int(time.time() * 1000)}"
     result = chat_response(req.message)
 
-    await db.execute(
-        "INSERT INTO messages (session_id, role, content, topic) VALUES (?, 'user', ?, ?)",
-        (session_id, req.message, result["topic"]),
-    )
-    await db.execute(
-        "INSERT INTO messages (session_id, role, content, topic) VALUES (?, 'bot', ?, ?)",
-        (session_id, result["reply"], result["topic"]),
-    )
-    await db.commit()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO messages (session_id, role, content, topic) VALUES ($1, 'user', $2, $3)",
+            session_id, req.message, result["topic"],
+        )
+        await conn.execute(
+            "INSERT INTO messages (session_id, role, content, topic) VALUES ($1, 'bot', $2, $3)",
+            session_id, result["reply"], result["topic"],
+        )
 
     return {"reply": result["reply"], "session_id": session_id, "topic": result["topic"]}
 
 
 @app.get("/api/chat/messages")
 async def get_messages(
-    request: Request,
-    session_id: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0,
+    request: Request, session_id: Optional[str] = None,
+    limit: int = 100, offset: int = 0,
 ):
-    """Retrieve stored chat messages."""
-    db: aiosqlite.Connection = request.app.state.db
-    if session_id:
-        cursor = await db.execute(
-            "SELECT id, session_id, role, content, topic, created_at FROM messages "
-            "WHERE session_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
-            (session_id, limit, offset),
-        )
-    else:
-        cursor = await db.execute(
-            "SELECT id, session_id, role, content, topic, created_at FROM messages "
-            "ORDER BY id DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        )
-    rows = await cursor.fetchall()
-    total_cursor = await db.execute("SELECT COUNT(*) FROM messages")
-    total = (await total_cursor.fetchone())[0]
-    return {
-        "total": total,
-        "messages": [
-            {"id": r[0], "session_id": r[1], "role": r[2], "content": r[3], "topic": r[4], "created_at": r[5]}
-            for r in rows
-        ],
-    }
+    pool: asyncpg.Pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        if session_id:
+            rows = await conn.fetch(
+                "SELECT id, session_id, role, content, topic, created_at FROM messages "
+                "WHERE session_id = $1 ORDER BY id DESC LIMIT $2 OFFSET $3",
+                session_id, limit, offset,
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT id, session_id, role, content, topic, created_at FROM messages "
+                "ORDER BY id DESC LIMIT $1 OFFSET $2",
+                limit, offset,
+            )
+        total = await conn.fetchval("SELECT COUNT(*) FROM messages")
+    return {"total": total, "messages": [dict(r) for r in rows]}
 
 
 @app.get("/api/chat/stats")
 async def get_stats(request: Request):
-    """Get chat statistics."""
-    db: aiosqlite.Connection = request.app.state.db
-    stats = {}
-
-    # Total messages
-    cursor = await db.execute("SELECT COUNT(*) FROM messages")
-    stats["total_messages"] = (await cursor.fetchone())[0]
-
-    # Messages by role
-    cursor = await db.execute("SELECT role, COUNT(*) FROM messages GROUP BY role")
-    stats["by_role"] = {r[0]: r[1] for r in await cursor.fetchall()}
-
-    # Unique sessions
-    cursor = await db.execute("SELECT COUNT(DISTINCT session_id) FROM messages")
-    stats["unique_sessions"] = (await cursor.fetchone())[0]
-
-    # Messages by topic
-    cursor = await db.execute(
-        "SELECT COALESCE(topic,'unknown'), COUNT(*) FROM messages WHERE role='user' GROUP BY topic ORDER BY COUNT(*) DESC"
-    )
-    stats["by_topic"] = {r[0]: r[1] for r in await cursor.fetchall()}
-
-    # Messages over time (last 30 days)
-    cursor = await db.execute(
-        "SELECT DATE(created_at) as day, COUNT(*) FROM messages "
-        "WHERE created_at >= datetime('now', '-30 days') GROUP BY day ORDER BY day"
-    )
-    stats["daily"] = {r[0]: r[1] for r in await cursor.fetchall()}
-
-    # Recent sessions
-    cursor = await db.execute(
-        "SELECT session_id, MIN(created_at) as started, COUNT(*) as msgs FROM messages "
-        "GROUP BY session_id ORDER BY started DESC LIMIT 20"
-    )
-    stats["recent_sessions"] = [
-        {"session_id": r[0], "started": r[1], "message_count": r[2]}
-        for r in await cursor.fetchall()
-    ]
-
-    return stats
+    pool: asyncpg.Pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        total = await conn.fetchval("SELECT COUNT(*) FROM messages")
+        by_role = {r["role"]: r["count"] for r in await conn.fetch(
+            "SELECT role, COUNT(*) FROM messages GROUP BY role")}
+        sessions = await conn.fetchval("SELECT COUNT(DISTINCT session_id) FROM messages")
+        by_topic = {r["topic"]: r["count"] for r in await conn.fetch(
+            "SELECT COALESCE(topic,'unknown') as topic, COUNT(*) FROM messages "
+            "WHERE role='user' GROUP BY topic ORDER BY COUNT(*) DESC")}
+        daily = {str(r["day"]): r["count"] for r in await conn.fetch(
+            "SELECT created_at::date as day, COUNT(*) FROM messages "
+            "WHERE created_at >= NOW() - INTERVAL '30 days' GROUP BY day ORDER BY day")}
+        recent = [dict(r) for r in await conn.fetch(
+            "SELECT session_id, MIN(created_at) as started, COUNT(*) as msgs FROM messages "
+            "GROUP BY session_id ORDER BY started DESC LIMIT 20")]
+    return {
+        "total_messages": total, "by_role": by_role, "unique_sessions": sessions,
+        "by_topic": by_topic, "daily": daily, "recent_sessions": recent,
+    }
 
 
 @app.get("/api/chat/sessions")
 async def list_sessions(request: Request, limit: int = 50):
-    """List all chat sessions with metadata."""
-    db: aiosqlite.Connection = request.app.state.db
-    cursor = await db.execute(
-        "SELECT session_id, MIN(created_at) as started, MAX(created_at) as last_active, "
-        "COUNT(*) as total_msgs, "
-        "SUM(CASE WHEN role='user' THEN 1 ELSE 0 END) as user_msgs, "
-        "SUM(CASE WHEN role='bot' THEN 1 ELSE 0 END) as bot_msgs "
-        "FROM messages GROUP BY session_id ORDER BY started DESC LIMIT ?",
-        (limit,),
-    )
-    rows = await cursor.fetchall()
-    return {
-        "sessions": [
-            {
-                "session_id": r[0], "started": r[1], "last_active": r[2],
-                "total_messages": r[3], "user_messages": r[4], "bot_messages": r[5],
-            }
-            for r in rows
-        ]
-    }
+    pool: asyncpg.Pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT session_id, MIN(created_at) as started, MAX(created_at) as last_active, "
+            "COUNT(*) as total_msgs, SUM(CASE WHEN role='user' THEN 1 ELSE 0 END) as user_msgs, "
+            "SUM(CASE WHEN role='bot' THEN 1 ELSE 0 END) as bot_msgs "
+            "FROM messages GROUP BY session_id ORDER BY started DESC LIMIT $1", limit)
+    return {"sessions": [dict(r) for r in rows]}
 
 
 # ── Blog Endpoints ────────────────────────────────────────────────
 
 @app.get("/api/blog")
 async def list_blogs(request: Request):
-    """List all blog posts."""
-    db: aiosqlite.Connection = request.app.state.db
-    cursor = await db.execute(
-        "SELECT id, title, summary, content, tags, created_at, updated_at FROM blog_posts ORDER BY created_at DESC"
-    )
-    rows = await cursor.fetchall()
-    return {
-        "blogs": [
-            {
-                "id": r[0], "title": r[1], "summary": r[2], "content": r[3],
-                "tags": json.loads(r[4]), "created_at": r[5], "updated_at": r[6],
-            }
-            for r in rows
-        ]
-    }
+    pool: asyncpg.Pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, title, summary, content, tags, created_at, updated_at "
+            "FROM blog_posts ORDER BY created_at DESC")
+    return {"blogs": [dict(r) for r in rows]}
 
 
 @app.post("/api/blog")
 async def create_blog(post: BlogPost, request: Request):
-    """Create a new blog post."""
-    db: aiosqlite.Connection = request.app.state.db
-    cursor = await db.execute(
-        "INSERT INTO blog_posts (title, summary, content, tags) VALUES (?, ?, ?, ?)",
-        (post.title, post.summary, post.content, json.dumps(post.tags)),
-    )
-    await db.commit()
-    return {"id": cursor.lastrowid, "title": post.title}
+    pool: asyncpg.Pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "INSERT INTO blog_posts (title, summary, content, tags) VALUES ($1,$2,$3,$4) RETURNING id, title",
+            post.title, post.summary, post.content, json.dumps(post.tags))
+    return dict(row)
 
 
 @app.put("/api/blog/{post_id}")
 async def update_blog(post_id: int, post: BlogUpdate, request: Request):
-    """Update a blog post."""
-    db: aiosqlite.Connection = request.app.state.db
-    updates = {}
-    if post.title is not None:
-        updates["title"] = post.title
-    if post.summary is not None:
-        updates["summary"] = post.summary
-    if post.content is not None:
-        updates["content"] = post.content
-    if post.tags is not None:
-        updates["tags"] = json.dumps(post.tags)
-    if not updates:
-        raise HTTPException(400, "No fields to update")
-    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-    set_clause = ", ".join(f"{k}=?" for k in updates)
-    values = list(updates.values()) + [post_id]
-    cursor = await db.execute(f"UPDATE blog_posts SET {set_clause} WHERE id=?", values)
-    await db.commit()
-    if cursor.rowcount == 0:
-        raise HTTPException(404, "Blog post not found")
+    pool: asyncpg.Pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        exists = await conn.fetchval("SELECT id FROM blog_posts WHERE id = $1", post_id)
+        if not exists:
+            raise HTTPException(404, "Blog post not found")
+        sets, args, n = [], [], 1
+        for field, val in [("title", post.title), ("summary", post.summary),
+                           ("content", post.content), ("tags", post.tags)]:
+            if val is not None:
+                sets.append(f"{field} = ${n}"); n += 1
+                args.append(json.dumps(val) if field == "tags" else val)
+        if not sets:
+            raise HTTPException(400, "No fields to update")
+        sets.append(f"updated_at = NOW()")
+        args.append(post_id)
+        await conn.execute(f"UPDATE blog_posts SET {', '.join(sets)} WHERE id = ${n}", *args)
     return {"updated": True}
 
 
 @app.delete("/api/blog/{post_id}")
 async def delete_blog(post_id: int, request: Request):
-    """Delete a blog post."""
-    db: aiosqlite.Connection = request.app.state.db
-    cursor = await db.execute("DELETE FROM blog_posts WHERE id=?", (post_id,))
-    await db.commit()
-    if cursor.rowcount == 0:
-        raise HTTPException(404, "Blog post not found")
+    pool: asyncpg.Pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        result = await conn.execute("DELETE FROM blog_posts WHERE id = $1", post_id)
+        if result == "DELETE 0":
+            raise HTTPException(404, "Blog post not found")
     return {"deleted": True}
 
 
@@ -378,35 +310,33 @@ async def delete_blog(post_id: int, request: Request):
 
 @app.post("/api/contact")
 async def contact(submission: ContactSubmission, request: Request):
-    """Submit a contact form message."""
-    db: aiosqlite.Connection = request.app.state.db
-    await db.execute(
-        "INSERT INTO contact_submissions (name, email, message) VALUES (?, ?, ?)",
-        (submission.name, submission.email, submission.message),
-    )
-    await db.commit()
+    pool: asyncpg.Pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO contact_submissions (name, email, message) VALUES ($1, $2, $3)",
+            submission.name, submission.email, submission.message)
     return {"status": "received", "message": "Thank you! Your message has been received."}
 
 
 @app.get("/api/contact/submissions")
 async def list_contacts(request: Request, limit: int = 50):
-    """List contact form submissions (admin)."""
-    db: aiosqlite.Connection = request.app.state.db
-    cursor = await db.execute(
-        "SELECT id, name, email, message, created_at FROM contact_submissions ORDER BY created_at DESC LIMIT ?",
-        (limit,),
-    )
-    rows = await cursor.fetchall()
-    return {
-        "submissions": [
-            {"id": r[0], "name": r[1], "email": r[2], "message": r[3], "created_at": r[4]}
-            for r in rows
-        ]
-    }
+    pool: asyncpg.Pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name, email, message, created_at FROM contact_submissions "
+            "ORDER BY created_at DESC LIMIT $1", limit)
+    return {"submissions": [dict(r) for r in rows]}
 
 
 # ── Health ────────────────────────────────────────────────────────
 
 @app.get("/api/health")
-async def health():
-    return {"status": "ok", "service": "portfolio-backend"}
+async def health(request: Request):
+    pool: asyncpg.Pool = request.app.state.pool
+    try:
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {e}"
+    return {"status": "ok", "service": "portfolio-backend", "database": db_status}
